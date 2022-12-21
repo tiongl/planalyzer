@@ -17,6 +17,7 @@ class PrintOption {
         options.addStage("BroadcastExchange", new String[]{"-"});
         options.addStage("HashAgg", new String[]{"-"});
         options.addStage("TableFunction", new String[]{"tableName", "filters"});
+        options.addStage("HashToRandomExchange", new String[]{ "dist" });
         options.addStage("Values", new String[]{});
         return options;
     }

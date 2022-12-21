@@ -28,13 +28,29 @@ public class PlanAnalyzer {
         if (list!=null) {
             logger.info("Analyzing " + planLine.getId() + " (depth=" + depth + ")");
             String planName = ctx.planName().ID().toString();
+            //some common processing
+            Map<String, PlanParser.EqValueContext> eqPairMap = getMap(list.eqPair());
+            if (eqPairMap.containsKey("condition")){
+                if (planLine.getChildren().size()==1){
+                    Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
+                    PlanParser.EqValueContext condition = eqPairMap.get("condition");
+                    String resolvedCond = resolveVariables(condition, sourceColumns, planLine.getId());
+                    newContextMap.put("conditionStr", resolvedCond);
+                }
+            } else if (eqPairMap.containsKey("dist0")){//more for broadcst
+                Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
+                PlanParser.EqValueContext dist = eqPairMap.get("dist0");
+                String resolvedExpr = resolveVariables(dist, sourceColumns, planLine.getId());
+                newContextMap.put("dist", resolvedExpr);
+            }
+
             if (planName.equals("HashJoin") || planName.equals("NestedLoopJoin")) {
                 Column[] leftColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
                 Column[] rightColumns = (Column[]) planLine.getChildren().get(1).getInfo().get("columns");
                 if (rightColumns == null) {
-                    logger.warning("Not columns from right upstream " + planLine.getChildren().get(0).getId());
+                    logger.warning("No columns info from right upstream " + planLine.getChildren().get(0).getId());
                 } else if (leftColumns == null) {
-                    logger.warning("Not columns from left upstream " + planLine.getChildren().get(1).getId());
+                    logger.warning("No columns info from left upstream " + planLine.getChildren().get(1).getId());
                 } else {
                     Map<String, Column> allKnownColumns = new HashMap();
                     addColumnsToMap(leftColumns, allKnownColumns);
@@ -50,20 +66,10 @@ public class PlanAnalyzer {
                             newColumns[i] = allKnownColumns.get(name);
                         }
                     }
-                    Map<String, PlanParser.EqValueContext> eqPairMap = getMap(list.eqPair());
-                    PlanParser.EqValueContext condition = eqPairMap.get("condition");
-                    String conditionStr = condition.BRACKET_STUFF().toString();
-                    try {
-                        String trimmedCondition = conditionStr.substring(1, conditionStr.length() - 1);
-                        logger.info("Examining condition " + trimmedCondition + " on " + planLine.getId());
-                        String resolvedCond = resolveCondition(trimmedCondition, newColumns);
-                        logger.info("Resolved condition of " + conditionStr + " = " + resolvedCond);
-                        newContextMap.put("conditionStr", resolvedCond);
-                        //TODO: find variables in join
-                    } catch (IOException e) {
-                        throw new RuntimeException("Unable to parse condition " + conditionStr, e);
-                    }
                     newContextMap.put("columns", newColumns);
+                    PlanParser.EqValueContext condition = eqPairMap.get("condition");
+                    String resolvedCond = resolveVariables(condition, newColumns, planLine.getId());
+                    newContextMap.put("conditionStr", resolvedCond);
                 }
             } else if (planName.equals("Project")) {
                 logger.info("Analyze projection");
@@ -82,42 +88,13 @@ public class PlanAnalyzer {
                         }
                     } else {
                         //complicate expression
-                        String str = list.eqPair(i).eqValue().BRACKET_STUFF().toString();
-                        String trimmed = str.substring(1, str.length() - 1);
-                        try {
-                            logger.info("Resolving projected column " + trimmed);
-                            String resolvedColumns = resolveCondition(trimmed, sourceColumns);
-                            if (resolvedColumns.length()>=trimmed.length()){
-                                logger.info("Resolved projected column " + resolvedColumns);
-                                newColumns[i] = new Column(name, new Column(resolvedColumns, null));
-                            } else {
-                                logger.warning("Fail to resolve projected column " + resolvedColumns);
-                                newColumns[i] = new Column(name, new Column(values[0], null));
-                            }
-                        } catch (IOException e){
-                            throw new RuntimeException("Unable to resolve columns");
-                        }
+                        String resolvedExpression = resolveVariables(list.eqPair(i).eqValue(), sourceColumns, planLine.getId());
+                        newColumns[i] = new Column(name, new Column(resolvedExpression, null));
                     }
                 }
                 newContextMap.put("columns", newColumns);
-            } else if (planName.equals("Filter")){
-                logger.info("Analyze filter");
-                Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
-                Map<String, PlanParser.EqValueContext> eqPairMap =  getMap(list.eqPair());
-                PlanParser.EqValueContext value = eqPairMap.get("condition");
-                String conditionStr = value.BRACKET_STUFF().toString();
-                String trimmedCondition = conditionStr.substring(1, conditionStr.length() - 1);
-                try {
-                    logger.info("Examining condition " + trimmedCondition + " on " + planLine.getId());
-                    String resolvedCond = resolveCondition(trimmedCondition, sourceColumns);
-                    logger.info("Resolved condition of " + conditionStr + " = " + resolvedCond);
-                    newContextMap.put("conditionStr", resolvedCond);
-                } catch (IOException e){
-                    throw new RuntimeException("Unable to parse filter " + conditionStr, e);
-                }
             } else { //maybe its plan1.txt table
                 logger.info("Maybe its table");
-                Map<String, PlanParser.EqValueContext> eqPairMap =  getMap(list.eqPair());
                 String tbName = null;
                 if (eqPairMap.containsKey("filters")){ //this must be first, the table analysis depends on it
                     String condition = eqPairMap.get("filters").BRACKET_STUFF().toString();
@@ -131,7 +108,7 @@ public class PlanAnalyzer {
                     if (isReflectionTable){
                         tbName = "ref-" + tableName[1].split("-")[0].replaceAll("\"", "");
                         if (newContextMap.containsKey("filters")){
-                            tbName = "ref-" + newContextMap.get("filters").hashCode();
+                            tbName = tbName + "-filter-" + newContextMap.get("filters").hashCode();
                         }
                     } else {
                         tbName = tableName[tableName.length-1];
@@ -146,10 +123,6 @@ public class PlanAnalyzer {
                         columns[j] = (addTablePrefix)? new Column(tbName + "." + columnName[j], null): new Column(columnName[j], null);
                     }
                     newContextMap.put("columns", columns);
-                }
-                if (eqPairMap.containsKey("condition")){
-                    String condition = eqPairMap.get("condition").BRACKET_STUFF().toString();
-                    newContextMap.put("condition", condition);
                 }
 
                 if (eqPairMap.containsKey("Values")){
@@ -171,11 +144,30 @@ public class PlanAnalyzer {
         return null;
     }
 
-    public String resolveCondition(String conditionStr, Column[] columns) throws IOException {
-        ExpressionParser.ExprContext cond = PlanUtils.parseCondition(conditionStr);
+    public String resolveVariables(PlanParser.EqValueContext value, Column[] columns, String planId){
+        String expressionStr = value.BRACKET_STUFF().toString();
+        try {
+            String trimmedExpression = expressionStr.substring(1, expressionStr.length() - 1);
+            logger.info("Examining expression " + trimmedExpression + " on " + planId);
+            String resolvedExpr = parseAndResolve(trimmedExpression, columns);
+            logger.info("Resolved expression of " + expressionStr + " = " + resolvedExpr);
+            return resolvedExpr;
+            //TODO: find variables in join
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to parse expression " + expressionStr, e);
+        }
+    }
+
+    public String parseAndResolve(String expressionStr, Column[] columns) throws IOException {
+        ExpressionParser.ExprContext expr = PlanUtils.parseExpression(expressionStr);
         ConditionVariableResolver resolver = new ConditionVariableResolver(columns);
-        String resolvedCond = resolver.visitExpr(cond);
-        return resolvedCond;
+        String resolvedExpr = resolver.visitExpr(expr);
+        if (resolvedExpr.length()<expressionStr.length()){
+            logger.warning("Cannot fully resolve expression " + expressionStr + ". Parse error maybe");
+            return expressionStr;
+        } else {
+            return resolvedExpr;
+        }
     }
 
     class Column{

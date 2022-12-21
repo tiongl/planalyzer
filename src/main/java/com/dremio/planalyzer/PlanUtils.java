@@ -11,7 +11,7 @@ import java.util.logging.Logger;
 
 public class PlanUtils {
 
-    public static ExpressionParser.ExprContext parseCondition(String s) throws IOException {
+    public static ExpressionParser.ExprContext parseExpression(String s) throws IOException {
         Lexer lexer = new ExpressionLexer(CharStreams.fromStream(new ByteArrayInputStream(s.getBytes())));
         TokenStream tokenStream = new CommonTokenStream(lexer);
         ExpressionParser parser = new ExpressionParser(tokenStream);

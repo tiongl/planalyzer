@@ -87,15 +87,19 @@ public class PlanPrinter {
     }
 
     public void process(PlanLine planLine){
-        boolean metaTableFunction = false;
+        boolean skip = false;
         if (planLine.getNode().planName().ID().getText().equals("TableFunction")){
             PlanAnalyzer.Column[] columns = (PlanAnalyzer.Column[])planLine.getInfo().get("columns");
             if (columns[0].getName().indexOf("splitsIdentity")!=-1){
-                metaTableFunction = true;
+                skip = true;
+            }
+        } else if (planLine.getNode().planName().ID().getText().equals("HashToRandomExchange")){
+            if (planLine.getInfo().containsKey("dist") && planLine.getInfo().get("dist").toString().contains("splitsIdentity")){
+                skip = true;
             }
         }
         String[] keys = options.isShowingPlan(planLine.getNode().planName().ID().getText());
-        boolean showing = !metaTableFunction && (options.showEverything() || keys!=null);
+        boolean showing = !skip && (options.showEverything() || keys!=null);
         if (showing) {
             planLine.getNode().accept(p);
             if (keys!=null) {

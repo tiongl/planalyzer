@@ -1,19 +1,24 @@
 grammar Plan;
 
-@members {
-    java.util.Stack<Integer> levels = new java.util.Stack<Integer>();
-}
+//@members {
+//    java.util.Stack<Integer> levels = new java.util.Stack<Integer>();
+//}
+
 expr: planLine (planLine)* EOF;
 
 planLine:  (PHASE { levels.push($PHASE.text.length()); } planName  ':' rowType ':' costList
-                (
-                    //can't really do this - StackOverflow easily
-                   { _input.LA(1)==PHASE && _input.LT(1).getText().length()>levels.peek().intValue()
-                }?
-                childPlan)*
-                ) { levels.pop(); };
+            /*
+            //The following try to establish the hierarchy but it doesn't work due to Antlr limitation
+            (
+                //can't really do this - StackOverflow easily
+               { _input.LA(1)==PHASE && _input.LT(1).getText().length()>levels.peek().intValue()
+            }?
+            childPlan)*
+            ) { levels.pop(); }
+            */
+                ;
 
-childPlan:  'ZZZZ' planLine; //can't get the Semantic Predicate in planLine to work - adding ZZZZ to bypass this.
+//childPlan:  'ZZZZ' planLine; //can't get the Semantic Predicate in planLine to work - adding ZZZZ to bypass this.
 
 //Screen line
 planName: ID eqList?;
@@ -50,9 +55,6 @@ eqValue: (
     BRACKET_STUFF
 );
 
-//some primitives
-//number: (INT | FLOAT | EXP);
-
 typeID:  (
     DOLLARV
     | ID
@@ -60,15 +62,13 @@ typeID:  (
 );
 
 // Keywords
-SPACE  : [ \t\r\n]+ -> channel(HIDDEN) ;
-BOOL_OP: ('>' | '>=' | '=' | '<' | '<=' | '<>');
-OP: ('+' | '-' | '*');
+SPACE  : [ \t\r\n]+ -> skip ;
 
 // Tokens
 PHASE: DIGIT+ '-' DIGIT+ ' '+;
 BRACKET_STUFF: '[' (~[[\]'"\n\r]+ | BRACKET_STUFF | STRING)+ ']';
 ID: ALPHA(ADD)* | DIGIT+(ALPHA[$])+(ADD)+ | '`' ~[`]+ '`';
-NUMBER: DIGIT+ ('.' DIGIT+ ('E'DIGIT+)?)?;
+NUMBER: '-'? DIGIT+ ('.' DIGIT+ ('E'DIGIT+)?)?;
 STRING: '"' ('"' | ~["]+ '"') | '\'' ('\'' | ~[']+ '\'');
 
 //UUID: [0-9a-zA-Z]+;
