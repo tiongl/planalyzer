@@ -34,13 +34,13 @@ public class PlanAnalyzer {
                 if (planLine.getChildren().size()==1){
                     Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
                     PlanParser.EqValueContext condition = eqPairMap.get("condition");
-                    String resolvedCond = resolveVariables(condition, sourceColumns, planLine.getId());
+                    String resolvedCond = resolveVariables(condition, sourceColumns, planLine.getId(), true);
                     newContextMap.put("conditionStr", resolvedCond);
                 }
             } else if (eqPairMap.containsKey("dist0")){//more for broadcst
                 Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
                 PlanParser.EqValueContext dist = eqPairMap.get("dist0");
-                String resolvedExpr = resolveVariables(dist, sourceColumns, planLine.getId());
+                String resolvedExpr = resolveVariables(dist, sourceColumns, planLine.getId(), true);
                 newContextMap.put("dist", resolvedExpr);
             }
 
@@ -68,13 +68,14 @@ public class PlanAnalyzer {
                     }
                     newContextMap.put("columns", newColumns);
                     PlanParser.EqValueContext condition = eqPairMap.get("condition");
-                    String resolvedCond = resolveVariables(condition, newColumns, planLine.getId());
+                    String resolvedCond = resolveVariables(condition, newColumns, planLine.getId(), true);
                     newContextMap.put("conditionStr", resolvedCond);
                 }
             } else if (planName.equals("Project")) {
                 logger.info("Analyze projection");
                 Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
                 Column[] newColumns = new Column[list.eqPair().size()];
+                StringBuffer projectionStr = new StringBuffer();
                 for (int i = 0; i < list.eqPair().size(); i++) {
                     String name = getEqId(list.eqPair(i));
                     String[] values = PlanUtils.parseBracketString(list.eqPair(i).eqValue().BRACKET_STUFF().toString(), ",");
@@ -83,15 +84,22 @@ public class PlanAnalyzer {
                         if (num < sourceColumns.length) {
                             newColumns[i] = new Column(name, sourceColumns[num]);
                         } else {
-
                             logger.warning("Unable to resolve column " + values[0] + " in " + planLine.getId());
                         }
                     } else {
                         //complicate expression
-                        String resolvedExpression = resolveVariables(list.eqPair(i).eqValue(), sourceColumns, planLine.getId());
-                        newColumns[i] = new Column(name, new Column(resolvedExpression, null));
+                        String resolvedExpression = resolveVariables(list.eqPair(i).eqValue(), sourceColumns, planLine.getId(), true);
+                        String resolvedExpressionTableless = resolveVariables(list.eqPair(i).eqValue(), sourceColumns, planLine.getId(), false);
+                        String newName = name + "_" + Math.abs(resolvedExpressionTableless.hashCode());
+//                        newColumns[i] = new Column(name, new Column(resolvedExpression, null));
+                        newColumns[i] = new Column(name, new Column(newName, null, resolvedExpression));
+                        if (projectionStr.length()>0){
+                            projectionStr.append(", ");
+                        }
+                        projectionStr.append(newName + "=" + resolvedExpression);
                     }
                 }
+                if (projectionStr.length()>0) newContextMap.put("projectionStr", projectionStr.toString());
                 newContextMap.put("columns", newColumns);
             } else { //maybe its plan1.txt table
                 logger.info("Maybe its table");
@@ -120,7 +128,7 @@ public class PlanAnalyzer {
                     Column[] columns = new Column[columnName.length];
                     boolean addTablePrefix = true;
                     for (int j = 0; j < columnName.length; j++) {
-                        columns[j] = (addTablePrefix)? new Column(tbName + "." + columnName[j], null): new Column(columnName[j], null);
+                        columns[j] = (addTablePrefix)? new Column(columnName[j], null): new Column(columnName[j], null, tbName);
                     }
                     newContextMap.put("columns", columns);
                 }
@@ -144,13 +152,13 @@ public class PlanAnalyzer {
         return null;
     }
 
-    public String resolveVariables(PlanParser.EqValueContext value, Column[] columns, String planId){
+    public String resolveVariables(PlanParser.EqValueContext value, Column[] columns, String planId, boolean withTableName){
         String expressionStr = value.BRACKET_STUFF().toString();
         try {
             String trimmedExpression = expressionStr.substring(1, expressionStr.length() - 1);
             logger.info("Examining expression " + trimmedExpression + " on " + planId);
-            String resolvedExpr = parseAndResolve(trimmedExpression, columns);
-            logger.info("Resolved expression of " + expressionStr + " = " + resolvedExpr);
+            String resolvedExpr = parseAndResolve(trimmedExpression, columns, withTableName);
+            logger.info("Resolved expression " + resolvedExpr);
             return resolvedExpr;
             //TODO: find variables in join
         } catch (IOException e) {
@@ -158,9 +166,9 @@ public class PlanAnalyzer {
         }
     }
 
-    public String parseAndResolve(String expressionStr, Column[] columns) throws IOException {
+    public String parseAndResolve(String expressionStr, Column[] columns, boolean printTableName) throws IOException {
         ExpressionParser.ExprContext expr = PlanUtils.parseExpression(expressionStr);
-        ConditionVariableResolver resolver = new ConditionVariableResolver(columns);
+        ConditionVariableResolver resolver = new ConditionVariableResolver(columns, printTableName);
         String resolvedExpr = resolver.visitExpr(expr);
         if (resolvedExpr.length()<expressionStr.length()){
             logger.warning("Cannot fully resolve expression " + expressionStr + ". Parse error maybe");
@@ -173,10 +181,24 @@ public class PlanAnalyzer {
     class Column{
         private String name;
         private Column source;
+        private String expression;
 
-        Column(String name, Column source){
+        private String tbName;
+
+        Column(String name, Column source) {
+            this(name, source, null);
+        }
+
+        Column(String name, Column source, String expression){
+            this(name, source, expression, null);
+        }
+
+
+        Column(String name, Column source, String expression, String tbName){
             this.name = name;
             this.source = source;
+            this.expression = expression;
+            this.tbName = tbName;
         }
 
         public Column root(){
@@ -189,6 +211,14 @@ public class PlanAnalyzer {
 
         public String getName() {
             return name;
+        }
+
+        public String getName(boolean withTbName){
+            if (withTbName && tbName!=null){
+                return tbName + "." + name;
+            } else {
+                return name;
+            }
         }
 
         @Override

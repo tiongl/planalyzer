@@ -75,11 +75,21 @@ public class PlanPrinter {
     }
 
     private Printer p = new Printer();
+    private StringBuffer output = new StringBuffer();
     private StringBuffer sb = new StringBuffer();
 
     private int depth = 0;
 
     public PlanPrinter(){
+    }
+
+    public void flush(){
+        output.append(sb);
+        sb.delete(0, sb.length());
+    }
+
+    public void clear(){
+        sb.delete(0, sb.length());
     }
 
     public PlanPrinter(PrintOption options){
@@ -98,9 +108,18 @@ public class PlanPrinter {
                 skip = true;
             }
         }
-        String[] keys = options.isShowingPlan(planLine.getNode().planName().ID().getText());
-        boolean showing = !skip && (options.showEverything() || keys!=null);
+        PrintOption.LineOptions lineOpts = options.isShowingPlan(planLine.getNode().planName().ID().getText());
+        boolean showing = !skip && (options.showEverything() || lineOpts!=null);
+        if (showing && lineOpts!=null && lineOpts.skipIfEmpty){
+            String[] keys = lineOpts.attrsToPrint;
+            boolean hasKeys = false;
+            for (int i = 0; i < keys.length; i++) {
+                hasKeys = hasKeys || planLine.getInfo().containsKey(keys[i]) || keys[i].equals("-");
+            }
+            showing = hasKeys;
+        }
         if (showing) {
+            String[] keys = lineOpts.attrsToPrint;
             planLine.getNode().accept(p);
             if (keys!=null) {
                 if (keys.length == 0) {
@@ -122,8 +141,15 @@ public class PlanPrinter {
                 }
             }
             sb.append("\n");
-            depth += 1;
+            if (sb.toString().contains("E_X_P_R_H_A_S_H_F_I_E_L_D")){
+                clear();
+                showing = false;
+            } else {
+                flush();
+                depth += 1;
+            }
         }
+
         for (int i = 0; i<planLine.getChildren().size(); i++){
             process(planLine.getChildren().get(i));
         }
@@ -133,7 +159,7 @@ public class PlanPrinter {
     }
 
     public String getString() {
-        return sb.toString();
+        return output.toString();
     }
 
     public static void main(String[] args) throws IOException {

@@ -1,24 +1,8 @@
 grammar Plan;
 
-//@members {
-//    java.util.Stack<Integer> levels = new java.util.Stack<Integer>();
-//}
-
 expr: planLine (planLine)* EOF;
 
-planLine:  (PHASE { levels.push($PHASE.text.length()); } planName  ':' rowType ':' costList
-            /*
-            //The following try to establish the hierarchy but it doesn't work due to Antlr limitation
-            (
-                //can't really do this - StackOverflow easily
-               { _input.LA(1)==PHASE && _input.LT(1).getText().length()>levels.peek().intValue()
-            }?
-            childPlan)*
-            ) { levels.pop(); }
-            */
-                ;
-
-//childPlan:  'ZZZZ' planLine; //can't get the Semantic Predicate in planLine to work - adding ZZZZ to bypass this.
+planLine:  (PHASE planName  ':' rowType ':' costList);
 
 //Screen line
 planName: ID eqList?;

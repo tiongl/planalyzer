@@ -2,7 +2,7 @@ grammar Expression;
 
 expr: expression EOF;
 
-expression: atom ('(' expression (COMMA expression)* ')' (':' type charset?)?)?;
+expression: atom ('(' expression (COMMA expression)* ')' (':' type charset?)?)? | '[' expression ']';
 
 charset: (ID | STRING)+;
 

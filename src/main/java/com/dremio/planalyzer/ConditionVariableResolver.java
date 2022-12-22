@@ -4,12 +4,15 @@ import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
 public class ConditionVariableResolver extends ExpressionBaseVisitor<String> {
-    StringBuffer sb = new StringBuffer();
+    private StringBuffer sb = new StringBuffer();
+
+    private boolean withTableName;
 
     private PlanAnalyzer.Column[] columns;
 
-    ConditionVariableResolver(PlanAnalyzer.Column[] columns) {
+    ConditionVariableResolver(PlanAnalyzer.Column[] columns, boolean withTableName) {
         this.columns = columns;
+        this.withTableName = withTableName;
     }
 
     @Override
@@ -25,7 +28,7 @@ public class ConditionVariableResolver extends ExpressionBaseVisitor<String> {
             if (t.getType()== ExpressionParser.DOLLARV){
                 int num = Integer.parseInt(t.getText().substring(1));
                 if (num<columns.length){
-                    sb.append(columns[num].root().getName());
+                    sb.append(columns[num].root().getName(withTableName));
                 } else {
                     sb.append(t.getText() + "!");
                 }
