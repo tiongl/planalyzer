@@ -1,18 +1,24 @@
 package com.dremio.planalyzer;
 
 
+import com.dremio.plananalyzer.PlanBaseVisitor;
+import com.dremio.plananalyzer.PlanParser;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
 import java.io.IOException;
+import java.text.DecimalFormat;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
-import static com.dremio.planalyzer.PlanParser.COMMA;
-import static com.dremio.planalyzer.PlanParser.PHASE;
+import static com.dremio.plananalyzer.ExpressionLexer.COMMA;
+import static com.dremio.plananalyzer.PlanLexer.PHASE;
 
 public class PlanPrinter {
 
+    static DecimalFormat NUMBER_FORMAT = new DecimalFormat("###,###,###,###");
 
     PrintOption options = new PrintOption();
-    private class Printer extends PlanBaseVisitor<Void>{
+    private class Printer extends PlanBaseVisitor<Void> {
 
         @Override
         public Void visitCharacterset(PlanParser.CharactersetContext ctx) {
@@ -53,18 +59,7 @@ public class PlanPrinter {
         @Override
         public Void visitTerminal(TerminalNode node) {
             int type = node.getSymbol().getType();
-            if (type==PHASE){
-                if (options.showPhase){
-                    sb.append(node.getText());
-                } else {
-                    StringBuffer sb1 = new StringBuffer();
-                    for (int i = 0; i<depth; i++){
-                        sb1.append("  ");
-                    }
-                    String phaseName = node.getSymbol().getText().trim();
-                    sb.append(phaseName + sb1.substring(phaseName.length()-5));
-                }
-            } else {
+            if (type!=PHASE){
                 sb.append(node.getText());
             }
             if (type==COMMA){
@@ -97,51 +92,76 @@ public class PlanPrinter {
     }
 
     public void process(PlanLine planLine){
-        boolean skip = false;
-        if (planLine.getNode().planName().ID().getText().equals("TableFunction")){
-            PlanAnalyzer.Column[] columns = (PlanAnalyzer.Column[])planLine.getInfo().get("columns");
-            if (columns[0].getName().indexOf("splitsIdentity")!=-1){
-                skip = true;
-            }
-        } else if (planLine.getNode().planName().ID().getText().equals("HashToRandomExchange")){
-            if (planLine.getInfo().containsKey("dist") && planLine.getInfo().get("dist").toString().contains("splitsIdentity")){
-                skip = true;
-            }
-        }
-        PrintOption.LineOptions lineOpts = options.isShowingPlan(planLine.getNode().planName().ID().getText());
-        boolean showing = !skip && (options.showEverything() || lineOpts!=null);
-        if (showing && lineOpts!=null && lineOpts.skipIfEmpty){
-            String[] keys = lineOpts.attrsToPrint;
-            boolean hasKeys = false;
-            for (int i = 0; i < keys.length; i++) {
-                hasKeys = hasKeys || planLine.getInfo().containsKey(keys[i]) || keys[i].equals("-");
-            }
-            showing = hasKeys;
-        }
+//        boolean skip = false;
+//        //some hardcoded rule
+//        if (planLine.getNode().planName().ID().getText().equals("TableFunction")){
+//            Column[] columns = (Column[])planLine.getInfo().get("columns");
+//            if (columns[0].getName().indexOf("splitsIdentity")!=-1){
+//                skip = true;
+//            }
+//        } else if (planLine.getNode().planName().ID().getText().equals("HashToRandomExchange")){
+//            if (planLine.getInfo().containsKey("dist") && planLine.getInfo().get("dist").toString().contains("splitsIdentity")){
+//                skip = true;
+//            }
+//        }
+//        PrintOption.LineOptions lineOpts = options.isShowingPlan(planLine.getNode().planName().ID().getText());
+//        boolean showing = !skip && (options.showEverything() || lineOpts!=null);
+//        if (showing && lineOpts!=null && lineOpts.skipIfEmpty){
+//            String[] keys = lineOpts.attrsToPrint;
+//            boolean hasKeys = false;
+//            for (int i = 0; i < keys.length; i++) {
+//                hasKeys = hasKeys || planLine.getInfo().containsKey(keys[i]) || keys[i].equals("-");
+//            }
+//            showing = hasKeys;
+//        }
+        PrintOption.LineOptions lineOpts = null;
+        boolean showing = true;
+
         if (showing) {
-            String[] keys = lineOpts.attrsToPrint;
+            String indent = getIndent(depth, planLine.getNode().PHASE()==null? "": planLine.getNode().PHASE().getText());
+            String[] keys = new String[0]; //lineOpts==null? new String[0]: lineOpts.attrsToPrint;
+            sb.append(indent);
             planLine.getNode().accept(p);
-            if (keys!=null) {
-                if (keys.length == 0) {
-                    sb.append(planLine.getInfo().toString());
-                } else {
-                    for (int i = 0; i <keys.length; i++) {
-                        Object obj = planLine.getInfo().get(keys[i]);
-                        if (obj!=null){
-                            if (obj instanceof Object[]){
-                                sb.append(keys[i] + "=[" + PlanUtils.mkString((Object[])obj) + "]");
-                            } else {
-                                sb.append(keys[i] + "=" + obj);
-                            }
-                            if (i<keys.length-1){
-                                sb.append(", ");
-                            }
-                        }
+
+            for (Map.Entry<String, Object> entry: planLine.getInfo().entrySet()) {
+                String key = entry.getKey();
+                Object obj = entry.getValue();
+                if (obj!=null){
+                    sb.append("\n");
+                    sb.append(indent);
+                    sb.append("--    ");
+                    if (obj instanceof Object[]){
+                        sb.append(key + " = [" + PlanUtils.mkString((Object[])obj) + "]");
+                    } else if (obj instanceof Column[]){
+                        sb.append(key + " = [" + PlanUtils.mkString((Column[])obj) + "]");
+                    } else  {
+                        sb.append(key + " = " + obj);
                     }
                 }
             }
+
+
             sb.append("\n");
-            if (sb.toString().contains("E_X_P_R_H_A_S_H_F_I_E_L_D")){
+            if (options.showMetrics){//print metric
+                Map<String, AtomicLong> metrics = (Map<String, AtomicLong>)planLine.getInfo().get("metric");
+                if (metrics!=null) {
+                    sb.append(indent);
+                    sb.append("--    ");
+                    for (Map.Entry<String, AtomicLong> m: metrics.entrySet()){
+                        String name = m.getKey().toLowerCase();
+                        sb.append(name + "=");
+                        if (name.contains("nano")){
+                            sb.append(formatTime(m.getValue().longValue()));
+                        } else {
+                            sb.append(NUMBER_FORMAT.format(m.getValue()));
+                        }
+                        sb.append(", ");
+                    }
+                    sb.append("\n");
+                }
+            }
+
+            if (!options.showEverything() && sb.toString().contains("E_X_P_R_H_A_S_H_F_I_E_L_D")){
                 clear();
                 showing = false;
             } else {
@@ -156,6 +176,33 @@ public class PlanPrinter {
         if (showing){
             depth -= 1;
         }
+    }
+
+    private String getIndent(int depth, String phaseName){
+        StringBuffer sb1 = new StringBuffer(phaseName);
+        for (int i = 0; i<depth; i++){
+            sb1.append("  ");
+        }
+        return sb1.toString();
+    }
+
+    private String formatTime(long nanos){
+        StringBuffer sb = new StringBuffer();
+        long seconds = nanos / 1000000000;
+        if (seconds>3600){
+            sb.append((long)(seconds/3600) + "h");
+            seconds %= 3600;
+        }
+        if (seconds>60){
+            sb.append((long)(seconds/60) + "m");
+            seconds %= 60;
+        }
+        if (seconds>0) {
+            sb.append((long)seconds + "s");
+        } else {
+            sb.append((float)seconds/1000000000);
+        }
+        return sb.toString();
     }
 
     public String getString() {

@@ -10,7 +10,7 @@ class PrintOption {
 
     static PrintOption JOIN_ANALYSIS() {
         PrintOption options = new PrintOption();
-        options.addStage("HashJoin", new String[]{"conditionStr"});
+        options.addStage("HashJoin", new String[]{"conditionStr", "JoinRatio"});
         options.addStage("NestedLoopJoin", new String[]{"conditionStr"});
         options.addStage("Filter", new String[]{ "conditionStr" });
         options.addStage("ParquetScan", new String[]{ "tableName", "filters"});
@@ -42,6 +42,7 @@ class PrintOption {
     boolean showCost = false;
     boolean showPhase = false;
     boolean showEqList = false;
+    boolean showMetrics = true;
 
     boolean showCharacterSet = false;
 
@@ -57,6 +58,7 @@ class PrintOption {
     }
 
     public boolean showEverything(){
-        return planToShow.isEmpty();
+        return true;
+//        return planToShow.isEmpty();
     }
 }

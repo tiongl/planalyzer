@@ -1,12 +1,13 @@
 package com.dremio.planalyzer;
 
+import com.dremio.plananalyzer.ExpressionLexer;
+import com.dremio.plananalyzer.ExpressionParser;
+import com.dremio.plananalyzer.PlanLexer;
+import com.dremio.plananalyzer.PlanParser;
 import org.antlr.v4.runtime.*;
 
 import java.io.*;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Stack;
+import java.util.*;
 import java.util.logging.Logger;
 
 public class PlanUtils {
@@ -24,16 +25,16 @@ public class PlanUtils {
         int n = planLines.size();
         PlanLine root = new PlanLine(planLines.get(0));
         stack.push(root);
-        int currentLevel = planLines.get(0).PHASE().toString().length();
+        int currentLevel = planLines.get(0).planName().ID().getSymbol().getCharPositionInLine(); //TODO: see if we need adjustment with phase name
         PlanPrinter printer = new PlanPrinter();
         for (int i = 1; i<n; i++){
             PlanParser.PlanLineContext line = planLines.get(i);
             PlanLine pl = new PlanLine(line);
-            logger.fine("Checking line " + i + " " + line.PHASE().toString().trim() + " " + line.planName().ID());
-            int level = line.PHASE().toString().length();
+            logger.fine("Checking line " + i + " " + line.PHASE() + " " + line.planName().ID());
+            int level = line.planName().ID().getSymbol().getCharPositionInLine();
             while (level<=currentLevel){
                 stack.pop();
-                currentLevel = stack.peek().getNode().PHASE().toString().length();
+                currentLevel = stack.peek().getNode().planName().ID().getSymbol().getCharPositionInLine();
             }
             logger.fine("Adding " + line.planName().ID() + " into " + stack.peek().getNode().planName().ID() + " depth = " + stack.size());
             stack.peek().getChildren().add(pl);
@@ -66,25 +67,31 @@ public class PlanUtils {
         return fixHierarchy(context.planLine());
     }
 
-    public static String mkString(Map<String, Object> map){
+    public static String mkString(Map<String, Object> map, Set<String> excludes){
         StringBuffer sb = new StringBuffer();
         Iterator<Map.Entry<String, Object>> entries = map.entrySet().iterator();
         while (entries.hasNext()){
             Map.Entry e = entries.next();
-            sb.append(e.getKey());
-            sb.append("=");
-            if (e.getValue() instanceof Map){
-                sb.append("{");
-                sb.append(mkString(((Map)e.getValue())));
-                sb.append("}");
-            } else if (e.getValue().getClass().isArray()){
-                sb.append("[");
-                sb.append(mkString((Object[])e.getValue()));
-                sb.append("]");
-            } else sb.append(e.getValue());
-            if (entries.hasNext()) sb.append(", ");
+            if (!excludes.contains(e.getKey())) {
+                sb.append(e.getKey());
+                sb.append("=");
+                if (e.getValue() instanceof Map) {
+                    sb.append("{");
+                    sb.append(mkString(((Map) e.getValue())));
+                    sb.append("}");
+                } else if (e.getValue().getClass().isArray()) {
+                    sb.append("[");
+                    sb.append(mkString((Object[]) e.getValue()));
+                    sb.append("]");
+                } else sb.append(e.getValue());
+                if (entries.hasNext()) sb.append(", ");
+            }
         }
         return sb.toString();
+    }
+
+    public static String mkString(Map<String, Object> map){
+        return mkString(map, Collections.EMPTY_SET);
     }
 
     public static String mkString(Object[] str){

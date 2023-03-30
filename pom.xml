@@ -36,6 +36,16 @@
       <artifactId>junit</artifactId>
       <version>4.11</version>
     </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.9.8</version>
+    </dependency>
+    <dependency>
+      <groupId>org.jsonschema2pojo</groupId>
+      <artifactId>jsonschema2pojo-core</artifactId>
+      <version>1.1.1</version>
+    </dependency>
   </dependencies>
 
   <build>
@@ -56,9 +66,6 @@
             </goals>
           </execution>
         </executions>
-        <configuration>
-          <mainClass>org.antlrfun.Hello</mainClass>
-        </configuration>
       </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
@@ -100,7 +107,6 @@
         <configuration>
           <listener>true</listener>
           <visitor>true</visitor>
-          <sourceDirectory>src/main/java</sourceDirectory>
           <outputDirectory>src/main/generated-sources</outputDirectory>
         </configuration>
         <executions>

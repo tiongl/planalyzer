@@ -2,7 +2,7 @@ grammar Expression;
 
 expr: expression EOF;
 
-expression: atom ('(' expression (COMMA expression)* ')' (':' type charset?)?)? | '[' expression ']';
+expression: atom (('(' expression (COMMA expression)* ')')? (':' type charset?)?)? | '[' expression ']';
 
 charset: (ID | STRING)+;
 
@@ -12,7 +12,7 @@ atom: (
     NUMBER
     | DOLLARV
     | (ID | STRING)+
-    | ('>' | '>=' | '=' | '<' | '<=' | '<>')
+    | ('>' | '>=' | '=' | '<' | '<=' | '<>' | '||')
     | ('+'|'-'|'*'|'/')
 ) ;
 

@@ -2,7 +2,7 @@ grammar Plan;
 
 expr: planLine (planLine)* EOF;
 
-planLine:  (PHASE planName  ':' rowType ':' costList);
+planLine:  (PHASE? planName  (':' (rowType ':')? costList)?);
 
 //Screen line
 planName: ID eqList?;
@@ -15,6 +15,7 @@ typePair: type typeID;
 type: (
     ID ( '(' NUMBER (',' NUMBER)? ')' ('ARRAY'| characterset)?)?
     | recordType
+    | 'BOOLEAN' 'IS'
 );
 
 characterset: 'CHARACTER' 'SET' STRING 'COLLATE' STRING 'NOT' 'NULL';
@@ -43,13 +44,15 @@ typeID:  (
     DOLLARV
     | ID
     | ('>' | '>=' | '=' | '<' | '<=' | '<>' | '+' | '-' | '*' | '/') NUMBER?
+    | 'NULL'
 );
 
 // Keywords
 SPACE  : [ \t\r\n]+ -> skip ;
 
 // Tokens
-PHASE: DIGIT+ '-' DIGIT+ ' '+;
+
+PHASE: DIGIT+ '-' DIGIT+;
 BRACKET_STUFF: '[' (~[[\]'"\n\r]+ | BRACKET_STUFF | STRING)+ ']';
 ID: ALPHA(ADD)* | DIGIT+(ALPHA[$])+(ADD)+ | '`' ~[`]+ '`';
 NUMBER: '-'? DIGIT+ ('.' DIGIT+ ('E'DIGIT+)?)?;

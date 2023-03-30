@@ -1,5 +1,7 @@
 package com.dremio.planalyzer;
 
+import com.dremio.plananalyzer.ExpressionBaseVisitor;
+import com.dremio.plananalyzer.ExpressionParser;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
@@ -8,9 +10,9 @@ public class ConditionVariableResolver extends ExpressionBaseVisitor<String> {
 
     private boolean withTableName;
 
-    private PlanAnalyzer.Column[] columns;
+    private Column[] columns;
 
-    ConditionVariableResolver(PlanAnalyzer.Column[] columns, boolean withTableName) {
+    ConditionVariableResolver(Column[] columns, boolean withTableName) {
         this.columns = columns;
         this.withTableName = withTableName;
     }
@@ -22,13 +24,19 @@ public class ConditionVariableResolver extends ExpressionBaseVisitor<String> {
     }
 
     @Override
+    public String visitExpression(ExpressionParser.ExpressionContext ctx) {
+        super.visitExpression(ctx);
+        return sb.toString();
+    }
+
+    @Override
     public String visitTerminal(TerminalNode node) {
         Token t = node.getSymbol();
         if (t.getType() != Token.EOF){
             if (t.getType()== ExpressionParser.DOLLARV){
                 int num = Integer.parseInt(t.getText().substring(1));
                 if (num<columns.length){
-                    sb.append(columns[num].root().getName(withTableName));
+                    sb.append(columns[num].root().getName(withTableName || true));
                 } else {
                     sb.append(t.getText() + "!");
                 }
