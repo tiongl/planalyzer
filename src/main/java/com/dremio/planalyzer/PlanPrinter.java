@@ -8,14 +8,12 @@ import org.antlr.v4.runtime.tree.TerminalNode;
 import java.io.IOException;
 import java.text.DecimalFormat;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static com.dremio.plananalyzer.ExpressionLexer.COMMA;
 import static com.dremio.plananalyzer.PlanLexer.PHASE;
 
 public class PlanPrinter {
 
-    static DecimalFormat NUMBER_FORMAT = new DecimalFormat("###,###,###,###");
 
     PrintOption options = new PrintOption();
     private class Printer extends PlanBaseVisitor<Void> {
@@ -142,24 +140,6 @@ public class PlanPrinter {
 
 
             sb.append("\n");
-            if (options.showMetrics){//print metric
-                Map<String, AtomicLong> metrics = (Map<String, AtomicLong>)planLine.getInfo().get("metric");
-                if (metrics!=null) {
-                    sb.append(indent);
-                    sb.append("--    ");
-                    for (Map.Entry<String, AtomicLong> m: metrics.entrySet()){
-                        String name = m.getKey().toLowerCase();
-                        sb.append(name + "=");
-                        if (name.contains("nano")){
-                            sb.append(formatTime(m.getValue().longValue()));
-                        } else {
-                            sb.append(NUMBER_FORMAT.format(m.getValue()));
-                        }
-                        sb.append(", ");
-                    }
-                    sb.append("\n");
-                }
-            }
 
             if (!options.showEverything() && sb.toString().contains("E_X_P_R_H_A_S_H_F_I_E_L_D")){
                 clear();
@@ -186,24 +166,6 @@ public class PlanPrinter {
         return sb1.toString();
     }
 
-    private String formatTime(long nanos){
-        StringBuffer sb = new StringBuffer();
-        long seconds = nanos / 1000000000;
-        if (seconds>3600){
-            sb.append((long)(seconds/3600) + "h");
-            seconds %= 3600;
-        }
-        if (seconds>60){
-            sb.append((long)(seconds/60) + "m");
-            seconds %= 60;
-        }
-        if (seconds>0) {
-            sb.append((long)seconds + "s");
-        } else {
-            sb.append((float)seconds/1000000000);
-        }
-        return sb.toString();
-    }
 
     public String getString() {
         return output.toString();

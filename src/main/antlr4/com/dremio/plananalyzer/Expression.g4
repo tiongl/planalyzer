@@ -10,10 +10,12 @@ type: expression;
 
 atom: (
     NUMBER
+    | DATE
     | DOLLARV
     | (ID | STRING)+
     | ('>' | '>=' | '=' | '<' | '<=' | '<>' | '||')
     | ('+'|'-'|'*'|'/')
+    | 'DISTINCT' DOLLARV
 ) ;
 
 // Tokens
@@ -22,6 +24,7 @@ ID: ALPHA(ADD)* | DIGIT+(ALPHA[$])+(ADD)+ | '`' ~[`]+ '`';
 NUMBER: '-'? DIGIT+ ('.' DIGIT+ ('E'DIGIT+)?)?;
 STRING: '"' ('"' | ~["]+ '"') | '\'' ('\'' | ~[']+ '\'');
 DOLLARV: '$' (NUMBER | ID)+;
+DATE: DIGIT DIGIT DIGIT DIGIT '-' DIGIT DIGIT '-' DIGIT DIGIT;
 COMMA: ',';
 //NL   : '\r' '\n' | '\n' | '\r';
 fragment ADD: [a-zA-Z0-9_$];

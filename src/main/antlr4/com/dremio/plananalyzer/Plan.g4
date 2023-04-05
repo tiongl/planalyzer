@@ -15,7 +15,7 @@ typePair: type typeID;
 type: (
     ID ( '(' NUMBER (',' NUMBER)? ')' ('ARRAY'| characterset)?)?
     | recordType
-    | 'BOOLEAN' 'IS'
+    | 'BOOLEAN' 'IS'?
 );
 
 characterset: 'CHARACTER' 'SET' STRING 'COLLATE' STRING 'NOT' 'NULL';
@@ -25,16 +25,17 @@ costList: costPair (COMMA costPair)* ;
 costPair: ID ID? '=' cost;
 cost: (NUMBER | cumulativeCost);
 cumulativeCost: '{' cumuCost (COMMA cumuCost)* '}';
-cumuCost: NUMBER ID;
+cumuCost: NUMBER ID | 'tiny';
 
 
 
 eqList: '(' eqPair (COMMA eqPair)* ')';
 eqPair: eqID ( '=' eqValue | eqValue); //eqValue directly is because eqId like '<=', '>=' etc
 eqID:  (
-    ID+
+    ID+ (('-' ID)| NUMBER | '#' NUMBER)*
     | DOLLARV
     | ('>' | '>=' | '=' | '<' | '<=' | '<>' | '+' | '-' | '*' | '/') NUMBER?
+    | 'IS' 'NULL'
 );
 eqValue: (
     BRACKET_STUFF

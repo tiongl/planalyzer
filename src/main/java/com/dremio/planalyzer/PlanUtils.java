@@ -5,6 +5,8 @@ import com.dremio.plananalyzer.ExpressionParser;
 import com.dremio.plananalyzer.PlanLexer;
 import com.dremio.plananalyzer.PlanParser;
 import org.antlr.v4.runtime.*;
+import org.antlr.v4.runtime.atn.ATNConfigSet;
+import org.antlr.v4.runtime.dfa.DFA;
 
 import java.io.*;
 import java.util.*;
@@ -16,6 +18,14 @@ public class PlanUtils {
         Lexer lexer = new ExpressionLexer(CharStreams.fromStream(new ByteArrayInputStream(s.getBytes())));
         TokenStream tokenStream = new CommonTokenStream(lexer);
         ExpressionParser parser = new ExpressionParser(tokenStream);
+        //        ANTLRErrorListener errListener = new BaseErrorListener() {
+//            @Override
+//            public void syntaxError(Recognizer<?, ?> recognizer, Object o, int i, int i1, String s, RecognitionException e) {
+//                throw new RuntimeException(e);
+//            }
+//        };
+//        lexer.addErrorListener(errListener);
+//        parser.addErrorListener(errListener);
         return parser.expr();
     }
 
@@ -45,25 +55,43 @@ public class PlanUtils {
     }
 
     public static PlanLine parsePlan(String fileName) throws IOException {
-        PlanParser.ExprContext context = getPlanLine(new FileInputStream(fileName));
-        BufferedReader input = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)));
-        int rowCount = 0;
-        while (input.readLine()!=null){
-            rowCount ++;
+        try {
+            PlanParser.ExprContext context = getPlanLine(new FileInputStream(fileName), true);
+            BufferedReader input = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)));
+            int rowCount = 0;
+            while (input.readLine() != null) {
+                rowCount++;
+            }
+            if (rowCount != context.planLine().size())
+                throw new IllegalStateException("Parsed plan doesn't match the line count (" + rowCount + "!=" + context.planLine().size() + ")");
+            return fixHierarchy(context.planLine());
+        } catch (Exception e){
+            logger.severe("Error parsing " + fileName + ": " + e.getMessage());
+            throw e;
         }
-        if (rowCount!=context.planLine().size()) throw new IllegalStateException("Parsed plan doesn't match the line count (" + rowCount + "!=" + context.planLine().size() + ")");
-        return fixHierarchy(context.planLine());
     }
 
-    private static PlanParser.ExprContext getPlanLine(InputStream inputStream) throws IOException {
+    private static PlanParser.ExprContext getPlanLine(InputStream inputStream, final boolean strict) throws IOException {
+        ANTLRErrorListener errListener = new BaseErrorListener(){
+            @Override
+            public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int charPositionInLine, String msg, RecognitionException e) {
+                if (strict) throw new RuntimeException(e);
+            }
+        };
         Lexer lexer = new PlanLexer(CharStreams.fromStream(inputStream));
+        lexer.addErrorListener(errListener);
         TokenStream tokenStream = new CommonTokenStream(lexer);
         PlanParser parser = new PlanParser(tokenStream);
+        parser.addErrorListener(errListener);
         return parser.expr();
     }
 
     public static PlanLine parsePlan(InputStream inputStream) throws IOException {
-        PlanParser.ExprContext context = getPlanLine(inputStream);
+        return parsePlan(inputStream, true);
+    }
+
+    public static PlanLine parsePlan(InputStream inputStream, boolean strict) throws IOException {
+        PlanParser.ExprContext context = getPlanLine(inputStream, strict);
         return fixHierarchy(context.planLine());
     }
 

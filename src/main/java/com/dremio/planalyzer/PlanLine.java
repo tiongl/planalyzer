@@ -7,7 +7,7 @@ import java.util.*;
 public class PlanLine {
     private Map<String, Object> info = new HashMap<String, Object>();
 
-    private Map<String, String> attrMap = null;
+    private LinkedHashMap<String, String> attrMap = null;
     private PlanParser.PlanLineContext node;
     private List<PlanLine> children = new ArrayList();
 
@@ -24,11 +24,15 @@ public class PlanLine {
         return node;
     }
 
+    public String getPlanName() {
+        return node.planName().ID().getText();
+    }
+
     public String getId() {
         if (node.PHASE()==null){
-            return node.planName().ID() + "#" + node.planName().ID().getSymbol().getLine();
+            return getPlanName() + "#" + node.planName().ID().getSymbol().getLine();
         } else {
-            return "" + node.PHASE() + ' ' + node.planName().ID() + "#" + node.planName().ID().getSymbol().getLine();
+            return "" + node.PHASE() + ' ' + getPlanName() + "#" + node.planName().ID().getSymbol().getLine();
         }
     }
 
@@ -37,7 +41,7 @@ public class PlanLine {
     }
 
 
-    public Map<String, String> getAttrMap() {
+    public LinkedHashMap<String, String> getAttrMap() {
         if (attrMap ==null){
             attrMap = new LinkedHashMap<>();
             if (node.planName().eqList()!=null) {
@@ -69,5 +73,13 @@ public class PlanLine {
         } else {
             return name;
         }
+    }
+
+    public PlanLine getChild(int i){
+        return children.get(i);
+    }
+
+    public int getChildCount(){
+        return children.size();
     }
 }

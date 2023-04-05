@@ -34,11 +34,15 @@ public class ConditionVariableResolver extends ExpressionBaseVisitor<String> {
         Token t = node.getSymbol();
         if (t.getType() != Token.EOF){
             if (t.getType()== ExpressionParser.DOLLARV){
-                int num = Integer.parseInt(t.getText().substring(1));
-                if (num<columns.length){
-                    sb.append(columns[num].root().getName(withTableName || true));
-                } else {
-                    sb.append(t.getText() + "!");
+                try {
+                    int num = Integer.parseInt(t.getText().substring(1));
+                    if (num < columns.length) {
+                        sb.append(columns[num].root().getName(withTableName || true));
+                    } else {
+                        sb.append(t.getText() + "!");
+                    }
+                } catch (NumberFormatException e){
+                    sb.append(t.getText());
                 }
             } else {
                 sb.append(node.getText());
