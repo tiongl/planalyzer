@@ -1,3 +1,4 @@
+import com.dremio.planalyzer.AnalysisOption;
 import com.dremio.planalyzer.PlanAnalyzer;
 import com.dremio.planalyzer.PlanLine;
 import com.dremio.planalyzer.PlanUtils;
@@ -13,7 +14,7 @@ public class PlanAnalyzerTest extends TestCase {
         InputStream inputStream = getClass().getResourceAsStream("plan1.txt");
         PlanLine root = PlanUtils.parsePlan(inputStream);
         PlanAnalyzer analyzer = new PlanAnalyzer();
-        analyzer.process(root);
+        analyzer.process(root, new AnalysisOption());
     }
 
     // test method to add two values
@@ -21,6 +22,6 @@ public class PlanAnalyzerTest extends TestCase {
         InputStream inputStream = getClass().getResourceAsStream("plan2.txt");
         PlanLine root = PlanUtils.parsePlan(inputStream);
         PlanAnalyzer analyzer = new PlanAnalyzer();
-        analyzer.process(root);
+        analyzer.process(root, new AnalysisOption());
     }
 }

@@ -3,12 +3,10 @@ package com.dremio.planalyzer;
 import com.dremio.plananalyzer.ExpressionParser;
 import com.dremio.plananalyzer.PlanParser;
 
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -20,13 +18,13 @@ public class PlanAnalyzer {
     int depth = 0;
 
     private Map<String, ReflectionDefinition> reflectionMap = new HashMap<String, ReflectionDefinition>();
-    private Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics;
+    private Map<List<Long>, Map<String, Metrics>> metrics;
 
     public PlanAnalyzer(){
-        this(new HashMap<String, ReflectionDefinition>(), new HashMap<List<Long>, Map<String, ProfileAnalyzer.Metrics>>());
+        this(new HashMap<String, ReflectionDefinition>(), new HashMap<List<Long>, Map<String, Metrics>>());
     }
 
-    public PlanAnalyzer(Map<String, ReflectionDefinition> reflectionDefinitionMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metricMap){
+    public PlanAnalyzer(Map<String, ReflectionDefinition> reflectionDefinitionMap, Map<List<Long>, Map<String, Metrics>> metricMap){
         reflectionMap = reflectionDefinitionMap;
         metrics = metricMap;
         rules.add(new ResolveRule("condition", "conditionStr"));
@@ -51,14 +49,14 @@ public class PlanAnalyzer {
     }
 
 
-    public Void process(PlanLine planLine) {
+    public Void process(PlanLine planLine, AnalysisOption option) {
         PlanParser.PlanLineContext ctx = planLine.getNode();
         Map newContextMap = new HashMap<String, String>();
 
         for (int i = 0; i<planLine.getChildren().size(); i++){
             depth += 1;
             logger.fine("Checking child " + planLine.getChildren().get(i).getId() + "(depth=" + depth + ")");
-                    process(planLine.getChildren().get(i));
+                    process(planLine.getChildren().get(i), option);
             depth -= 1;
         }
 
@@ -70,7 +68,7 @@ public class PlanAnalyzer {
         for (AnalyzerRule r: rules){
             if (r.match(planLine, attrMap)){
 //                System.out.println("Use rule " + r + " on " + planLine.getId());
-                r.process(planLine, attrMap, metrics, newContextMap, reflectionMap);
+                r.process(planLine, attrMap, metrics, newContextMap, reflectionMap, option);
                 matches += 1;
             }
         }
@@ -138,14 +136,14 @@ public class PlanAnalyzer {
             if (args.length>1) {
                 outputFile = args[1];
             }
-            analyzer.process(context, PrintOption.JOIN_ANALYSIS(), outputFile);
+            analyzer.process(context, new AnalysisOption(), outputFile);
 
         }
     }
 
-    public void process(PlanLine context, PrintOption printOptions, String outputFile) throws IOException {
-        process(context);
-        PlanPrinter printer = new PlanPrinter(printOptions);
+    public void process(PlanLine context, AnalysisOption option, String outputFile) throws IOException {
+        process(context, option);
+        PlanPrinter printer = new PlanPrinter(option);
         printer.process(context);
         if (outputFile!=null) {
             new FileOutputStream(outputFile).write(printer.getString().getBytes(StandardCharsets.UTF_8));

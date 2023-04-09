@@ -90,29 +90,6 @@ public class PlanPrinter {
     }
 
     public void process(PlanLine planLine){
-//        boolean skip = false;
-//        //some hardcoded rule
-//        if (planLine.getNode().planName().ID().getText().equals("TableFunction")){
-//            Column[] columns = (Column[])planLine.getInfo().get("columns");
-//            if (columns[0].getName().indexOf("splitsIdentity")!=-1){
-//                skip = true;
-//            }
-//        } else if (planLine.getNode().planName().ID().getText().equals("HashToRandomExchange")){
-//            if (planLine.getInfo().containsKey("dist") && planLine.getInfo().get("dist").toString().contains("splitsIdentity")){
-//                skip = true;
-//            }
-//        }
-//        PrintOption.LineOptions lineOpts = options.isShowingPlan(planLine.getNode().planName().ID().getText());
-//        boolean showing = !skip && (options.showEverything() || lineOpts!=null);
-//        if (showing && lineOpts!=null && lineOpts.skipIfEmpty){
-//            String[] keys = lineOpts.attrsToPrint;
-//            boolean hasKeys = false;
-//            for (int i = 0; i < keys.length; i++) {
-//                hasKeys = hasKeys || planLine.getInfo().containsKey(keys[i]) || keys[i].equals("-");
-//            }
-//            showing = hasKeys;
-//        }
-        PrintOption.LineOptions lineOpts = null;
         boolean showing = true;
 
         if (showing) {
@@ -174,7 +151,6 @@ public class PlanPrinter {
     public static void main(String[] args) throws IOException {
         if (args.length > 0) {
             PrintOption options = new PrintOption();
-            options.addStage("HashJoin", new String[]{});
             PlanLine pl = PlanUtils.parsePlan(args[0]);
             PlanPrinter printer = new PlanPrinter(options);
             printer.process(pl);

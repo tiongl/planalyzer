@@ -15,13 +15,14 @@ public class ProfileAnalyzer {
 
     static Logger logger = java.util.logging.Logger.getLogger(PlanAnalyzer.class.getName());
     
-    static List metricSet = Arrays.asList(new String[]{ "RECORD", "CACHE", "EVALUATE"});
+    static List metricSet = Arrays.asList(new String[]{ "RECORD", "CACHE", "EVALUATE", "GROUP"});
 
     public static void main(String[] args) throws IOException {
         if (args.length > 0) {
             ObjectMapper mapper = new ObjectMapper();
             mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
+            logger.info("Input file = " + args[0]);
             //JSON file to Java object
             Profile profile = mapper.readValue(new File(args[0]), Profile.class);
             Map<String, ReflectionDefinition> reflectionMap = getReflectionIdMap(profile);
@@ -32,32 +33,38 @@ public class ProfileAnalyzer {
                 outputFile = args[1];
             }
 
-//            processPlans(profile, outputFile, reflectionMap, metrics, Collections.singleton("Multi-Join analysis"));
-            processPlans(profile, outputFile, reflectionMap, metrics, Collections.<String>emptySet()); //analyze all phases
+            processPlans(profile, outputFile, reflectionMap, metrics, Collections.<String>emptyList(), new AnalysisOption()); //analyze all phases
 
         } else {
             System.out.println("ProfileAnalyzer <profile json> [<output>]");
         }
     }
 
-    private static Set<String> skipPhase = new HashSet<String>(Arrays.asList(new String[]{
-            "validation", "Execution Plan: Executor Selection"
-    }));
+    private static List<String> skipPhase = Arrays.asList(new String[]{
+            "CACHED_METADATA", "PERMISSION_CACHE_HIT", "Plan Cache Used", "validation", "Executor Selection"
+    });
+
+    public static boolean containSubstring(String str, List<String> substrings){
+        for (int k=0; k<substrings.size(); k++){
+            if (str.contains(substrings.get(k))){
+                return true;
+            }
+        }
+        return false;
+    }
 
     public static void processPlans(Profile profile, String outputFile, Map<String, ReflectionDefinition> reflectionMap, 
-                                    Map<List<Long>, Map<String, Metrics>> metrics, Set<String> sets) throws IOException {
+                                    Map<List<Long>, Map<String, Metrics>> metrics, List<String> targetPhases, AnalysisOption option) throws IOException {
         List<PlanPhase> phases = profile.getPlanPhases();
         for (PlanPhase p : phases) {
             String phaseName = p.getPhaseName().replaceAll(" ", "").toLowerCase();
-            if (p.getPhaseName().indexOf("CACHED_METADATA") == -1
-                    && p.getPhaseName().indexOf("PERMISSION_CACHE_HIT") == -1
-                    && p.getPhaseName().indexOf("Plan Cache Used") == -1
-                    && p.getPlan() != null && p.getPlan().length() > 10 && !skipPhase.contains(p.getPhaseName())
-                    && sets.size() == 0 || sets.contains(p.getPhaseName()) || sets.contains(phaseName)) {
+            if (!containSubstring(p.getPhaseName(), skipPhase)
+                    && p.getPlan()!=null && p.getPlan().trim().length() > 0 //not empty
+                    && (targetPhases.size() == 0 || containSubstring(phaseName, targetPhases))) {
                 String outFile = outputFile + "." + phaseName;
                 try {
                     logger.info("Analyzing phase '" + p.getPhaseName() + "'");
-                    analyzeAndWriteOutput(p.getPlan(), outFile, reflectionMap, metrics);
+                    analyzeAndWriteOutput(p.getPlan(), outFile, reflectionMap, metrics, option);
                     logger.info("Successfully analyze phase '" + p.getPhaseName() + "'");
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -67,17 +74,16 @@ public class ProfileAnalyzer {
         }
     }
 
-    private static void analyzeAndWriteOutput(String plan, String outputFile, Map reflectionMap, Map metrics) throws IOException {
+    private static void analyzeAndWriteOutput(String plan, String outputFile, Map reflectionMap, Map metrics, AnalysisOption option) throws IOException {
         BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile + ".input"));
         writer.write(plan);
         writer.close();
         try {
             PlanLine context = PlanUtils.parsePlan(new ByteArrayInputStream(plan.getBytes()));
             PlanAnalyzer analyzer = new PlanAnalyzer(reflectionMap, metrics);
-            analyzer.process(context, PrintOption.EVERYTHING(), outputFile);
+            analyzer.process(context, option, outputFile);
         } catch (Exception e){
             logger.warning("Problem analyzing plan: " + e.getMessage() + "\n" + plan);
-            e.printStackTrace();
         }
     }
 
@@ -149,7 +155,7 @@ public class ProfileAnalyzer {
                                 sb.append(mDef.getName() + " ");
                             }
                             boolean collecting = false;
-                            for (int k=0; i<metricSet.size(); k++){
+                            for (int k=0; k<metricSet.size(); k++){
                                 if (mDef.getName().contains(metricSet.get(k))){
                                     collecting = true;
                                 }
@@ -227,76 +233,5 @@ public class ProfileAnalyzer {
         }
     }
 
-    static class Metrics {
-        boolean calc = false;
-        long min = 0;
-        long max = 0;
-        long sum = 0;
-        long counts = 0;
 
-        String name;
-
-        public Metrics(String name) {
-            this.name = name;
-        }
-
-        public List<String> endPoints = new ArrayList<String>();
-        public List<Long> dataPoints = new ArrayList<Long>();
-
-        public void add(String endPoint, Long data) {
-            endPoints.add(endPoint);
-            dataPoints.add(data);
-        }
-
-        public String toString() {
-            calc();
-            if (name.contains("nano")) {
-                return "[sum:" + formatTime(sum) + ", min:" + formatTime(min) + ", max:" + formatTime(max) + "]";
-            } else {
-                return "[sum:" + NUMBER_FORMAT.format(sum) + ", min:" + NUMBER_FORMAT.format(min) + ", max:" + NUMBER_FORMAT.format(max) + "]";
-            }
-        }
-
-        public void calc(){
-            if (!calc) {
-                for (int i = 0; i < dataPoints.size(); i++) {
-                    long data = dataPoints.get(i);
-                    sum += data;
-                    min = Math.min(data, min);
-                    max = Math.max(data, max);
-                }
-                counts = dataPoints.size();
-                calc = true;
-            }
-        }
-
-        public long sum() {
-
-            long s = 0;
-            for (int i = 0; i < dataPoints.size(); i++) {
-                s += dataPoints.get(i);
-            }
-            return s;
-        }
-    }
-
-
-    private static String formatTime(long nanos){
-        StringBuffer sb = new StringBuffer();
-        long seconds = nanos / 1000000000;
-        if (seconds>3600){
-            sb.append((long)(seconds/3600) + "h");
-            seconds %= 3600;
-        }
-        if (seconds>60){
-            sb.append((long)(seconds/60) + "m");
-            seconds %= 60;
-        }
-        if (seconds>0) {
-            sb.append((long)seconds + "s");
-        } else {
-            sb.append((float)seconds/1000000000);
-        }
-        return sb.toString();
-    }
 }

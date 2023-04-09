@@ -7,7 +7,6 @@ import com.dremio.plananalyzer.ProjectFieldParser;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.TokenStream;
-import org.antlr.v4.runtime.tree.TerminalNode;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -18,7 +17,7 @@ import java.util.logging.Logger;
 public interface AnalyzerRule {
     public boolean match(PlanLine line, Map<String, String> attrMap);
 
-    public void process(PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap);
+    public void process(PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option);
 }
 
 class ResolveRule implements AnalyzerRule {
@@ -38,7 +37,7 @@ class ResolveRule implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap) {
+    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
        Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
         if (sourceColumns != null) {
             String condition = attrMap.get(inputAttr);
@@ -61,7 +60,7 @@ class JoinAnalysis implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap) {
+    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         Column[] leftColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
         Column[] rightColumns = (Column[]) planLine.getChildren().get(1).getInfo().get("columns");
         if (rightColumns == null) {
@@ -96,7 +95,7 @@ class ProjectAnalyzer implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap) {
+    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
         Column[] newColumns = new Column[attrMap.size()];
         StringBuffer projectionStr = new StringBuffer();
@@ -152,8 +151,8 @@ class TableAnalyzer implements AnalyzerRule {
 
     @Override
     public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>,
-            Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap,
-                        Map<String, ReflectionDefinition> reflectionMap) {
+            Map<String, Metrics>> metrics, Map newContextMap,
+                        Map<String, ReflectionDefinition> reflectionMap, AnalysisOption option) {
         String planName = planLine.getPlanName();
         String[] tableName = null;
         String tbName = null;
@@ -231,29 +230,49 @@ class MetricAnalyzer implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics,
-                        Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap) {
+    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics,
+                        Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         String[] strIds = planLine.getNode().PHASE().getText().split("-");
         Long[] ids = {Long.parseLong(strIds[0]), Long.parseLong(strIds[1])};
-        Map<String, ProfileAnalyzer.Metrics> metric = metrics.get(Arrays.asList(ids));
+        Map<String, Metrics> metric = metrics.get(Arrays.asList(ids));
         if (metric != null && metric.size() > 0) {
             if (logger.isLoggable(Level.FINE)){
                 logger.fine("Found metrics for " + planLine.getId() + " " + PlanUtils.mkString(metric.entrySet().toArray()));
             }
-            newContextMap.put("metric", metric);
+            if (option.verboxMetrics) {
+                newContextMap.put("metric", metric);
+            } else {
+                newContextMap.put("metric", toSum(metric));
+            }
+            Metrics input0 = metric.get("input_record0");
+            newContextMap.put("input0_skewness", input0.skewness());
             if (metric.containsKey("input_record1") && metric.containsKey("output_records")) {//a join
-                long input0 = metric.get("input_record0").sum();
-                long input1 = metric.get("input_record1").sum();
-                long output = metric.get("output_records").sum();
-                double input = Math.max(input0, input1);
+                Metrics input1 = metric.get("input_record1");
+
+                Metrics output = metric.get("output_records");
+                double input = Math.max(input0.sum(), input1.sum());
                 if (input == 0) {
                     newContextMap.put("JoinRatio", 0);
                 } else {
-                    newContextMap.put("JoinRatio", output / input);
+                    newContextMap.put("JoinRatio", output.sum() / input);
                 }
+                newContextMap.put("input1_skewness", input1.skewness());
+                newContextMap.put("output_skewness", output.skewness());
             }
         }
 
+    }
+
+    private Map<String, Object> toSum(Map<String, Metrics> metrics) {
+        Map<String, Object> sumOnly = new LinkedHashMap<>();
+        for (Map.Entry<String, Metrics> e: metrics.entrySet()){
+            if (e.getKey().endsWith("nanos")) {
+                sumOnly.put(e.getKey(), Metrics.formatTime(e.getValue().sum()));
+            } else {
+                sumOnly.put(e.getKey(), Long.valueOf(e.getValue().sum()));
+            }
+        }
+        return sumOnly;
     }
 }
 
@@ -274,8 +293,8 @@ class CopyingRule implements AnalyzerRule {
 
     @Override
     public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>,
-            Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap, Map<String,
-            ReflectionDefinition> reflectionDefinitionMap) {
+            Map<String, Metrics>> metrics, Map newContextMap, Map<String,
+            ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         Map<String, Object> childInfo = planLine.getChildren().get(0).getInfo();
         for (Map.Entry<String, Object> entry: childInfo.entrySet()){
             if (keys.size()==0 || keys.contains(entry.getKey())) {
@@ -297,7 +316,7 @@ class MultiJoinAnalyzer implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap) {
+    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         try {
             List<int[]> projectFields = parseProjectionFields(attrMap.get("projFields"));
             ArrayList<Column> outColumns = new ArrayList<Column>();
@@ -363,7 +382,7 @@ class AggregateRule implements AnalyzerRule{
     }
 
     @Override
-    public void process(PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, ProfileAnalyzer.Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap) {
+    public void process(PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         PlanLine child = line.getChild(0);
 
         Column[] sourceColumns = (Column[])child.getInfo().get("columns");
