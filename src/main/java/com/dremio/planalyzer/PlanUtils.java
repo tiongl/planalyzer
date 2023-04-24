@@ -14,18 +14,20 @@ import java.util.logging.Logger;
 
 public class PlanUtils {
 
-    public static ExpressionParser.ExprContext parseExpression(String s) throws IOException {
+    public static ExpressionParser.ExprContext parseExpression(final String s) throws IOException {
+        ANTLRErrorListener errListener = new BaseErrorListener(){
+            @Override
+            public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int charPositionInLine, String msg, RecognitionException e) {
+//                if (strict)
+                    throw new RuntimeException("Cannot parse " + s + ":" + e.getMessage());
+            }
+        };
+
         Lexer lexer = new ExpressionLexer(CharStreams.fromStream(new ByteArrayInputStream(s.getBytes())));
         TokenStream tokenStream = new CommonTokenStream(lexer);
         ExpressionParser parser = new ExpressionParser(tokenStream);
-        //        ANTLRErrorListener errListener = new BaseErrorListener() {
-//            @Override
-//            public void syntaxError(Recognizer<?, ?> recognizer, Object o, int i, int i1, String s, RecognitionException e) {
-//                throw new RuntimeException(e);
-//            }
-//        };
-//        lexer.addErrorListener(errListener);
-//        parser.addErrorListener(errListener);
+        lexer.addErrorListener(errListener);
+        parser.addErrorListener(errListener);
         return parser.expr();
     }
 

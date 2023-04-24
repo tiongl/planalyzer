@@ -18,7 +18,7 @@ public class ProfileAnalyzer {
     static List metricSet = Arrays.asList(new String[]{ "RECORD", "CACHE", "EVALUATE", "GROUP"});
 
     public static void main(String[] args) throws IOException {
-        if (args.length > 0) {
+        if (args.length > 1) {
             ObjectMapper mapper = new ObjectMapper();
             mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
@@ -79,7 +79,7 @@ public class ProfileAnalyzer {
         writer.write(plan);
         writer.close();
         try {
-            PlanLine context = PlanUtils.parsePlan(new ByteArrayInputStream(plan.getBytes()));
+            PlanLine context = PlanUtils.parsePlan(new ByteArrayInputStream(plan.getBytes()), option.strictParsing);
             PlanAnalyzer analyzer = new PlanAnalyzer(reflectionMap, metrics);
             analyzer.process(context, option, outputFile);
         } catch (Exception e){
@@ -138,6 +138,8 @@ public class ProfileAnalyzer {
                         profileNum += 1;
                     }
 
+//                    addMetric(collected, "finish_duration", minorFrag.getEndpoint().getAddress(), minorFrag.getFinishDuration());
+//                    addMetric(collected, "duration", minorFrag.getEndpoint().getAddress(), minorFrag.getRunDuration());
                     addMetric(collected, "thread", minorFrag.getEndpoint().getAddress(), 1);
                     //Collecting metrics on ops
                     addMetric(collected, "processing_nanos", minorFrag.getEndpoint().getAddress(), opProf.getProcessNanos());

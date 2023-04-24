@@ -97,6 +97,10 @@ public class PlanPrinter {
             String[] keys = new String[0]; //lineOpts==null? new String[0]: lineOpts.attrsToPrint;
             sb.append(indent);
             planLine.getNode().accept(p);
+            if (planLine.getPlanName().contains("Join")){
+                sb.append(" join_condition = " + planLine.getInfo().get("join_condition"));
+                sb.append(", broadcast = " + planLine.getInfo().get("is_broadcast"));
+            }
 
             for (Map.Entry<String, Object> entry: planLine.getInfo().entrySet()) {
                 String key = entry.getKey();

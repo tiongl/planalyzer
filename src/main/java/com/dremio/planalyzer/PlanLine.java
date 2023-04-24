@@ -82,4 +82,10 @@ public class PlanLine {
     public int getChildCount(){
         return children.size();
     }
+
+    public Map<String, Metrics> getMetrics(Map<List<Long>, Map<String, Metrics>> metrics) {
+        String[] strIds = getNode().PHASE().getText().split("-");
+        Long[] ids = {Long.parseLong(strIds[0]), Long.parseLong(strIds[1])};
+        return metrics.get(Arrays.asList(ids));
+    }
 }

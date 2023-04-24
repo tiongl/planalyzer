@@ -7,9 +7,12 @@ import com.dremio.plananalyzer.ProjectFieldParser;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.TokenStream;
+import org.antlr.v4.runtime.tree.TerminalNode;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.text.NumberFormat;
+import java.text.ParseException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -17,7 +20,7 @@ import java.util.logging.Logger;
 public interface AnalyzerRule {
     public boolean match(PlanLine line, Map<String, String> attrMap);
 
-    public void process(PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option);
+    public void process(PlanLine parent, int childIdx, PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option);
 }
 
 class ResolveRule implements AnalyzerRule {
@@ -37,12 +40,80 @@ class ResolveRule implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
        Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
         if (sourceColumns != null) {
             String condition = attrMap.get(inputAttr);
             String resolvedCond = PlanAnalyzer.resolveVariables(condition, sourceColumns, planLine.getId(), true);
             newContextMap.put(outputAttr, resolvedCond);
+        } else {
+            logger.warning("Cannot find source columns from upstream of " + planLine.getId() + ", " + planLine.getChildren().get(0).getId());
+        }
+    }
+
+}
+
+class CostAnalyzer implements AnalyzerRule {
+    Logger logger = java.util.logging.Logger.getLogger(CostAnalyzer.class.getName());
+
+    @Override
+    public boolean match(PlanLine line, Map<String, String> attrMap) {
+        return line.getNode().costList()!=null;
+    }
+
+    @Override
+    public void process(PlanLine parent, int childIdx, PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
+        TerminalNode rowCount = line.getNode().costList().costPair(0).ID().get(0);
+        if (rowCount.getText().equals("rowcount")){
+            String rowCountStr = line.getNode().costList().costPair(0).cost().getText();
+            try {
+                Number i = NumberFormat.getInstance().parse(rowCountStr);
+                newContextMap.put("estimated_row_count", Metrics.formatRowCount(i.longValue()));
+                if (parent!=null && parent.getNode().PHASE()!=null){
+                    Map<String, Metrics> metricsMap = parent.getMetrics(metrics);
+                    if (metricsMap!=null) {
+                        Metrics actual = metricsMap.get("input_record" + childIdx);
+                        double ratio = i.doubleValue() / actual.sum();
+                        newContextMap.put("estimation_accuracy", ratio);
+                    } else {
+                        logger.warning("Cannot get metrics map for " + parent.getNode().getText());
+                    }
+                }
+            } catch (ParseException e) {
+                throw new RuntimeException(e);
+            }
+
+        }
+
+    }
+}
+
+class ExchangeResolveRule implements AnalyzerRule {
+    Logger logger = java.util.logging.Logger.getLogger(ResolveRule.class.getName());
+
+    public ExchangeResolveRule() {
+    }
+
+    @Override
+    public boolean match(PlanLine line, Map<String, String> attrMap) {
+        return line.getPlanName().contains("HashToRandomExchange");
+    }
+
+    @Override
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
+        Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
+        if (sourceColumns != null) {
+            List<String> keys = new ArrayList<>();
+            int i = 0;
+            while (true){
+                String dist = attrMap.get("dist" + i);
+                if (dist!=null){
+                    String resolved = PlanAnalyzer.resolveVariables(dist, sourceColumns, planLine.getId(), true);
+                    keys.add(resolved);
+                } else break;
+                i += 1;
+            }
+            newContextMap.put("dist", keys);
         } else {
             logger.warning("Cannot find source columns from upstream of " + planLine.getId() + ", " + planLine.getChildren().get(0).getId());
         }
@@ -60,7 +131,7 @@ class JoinAnalysis implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         Column[] leftColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
         Column[] rightColumns = (Column[]) planLine.getChildren().get(1).getInfo().get("columns");
         if (rightColumns == null) {
@@ -70,7 +141,8 @@ class JoinAnalysis implements AnalyzerRule {
         } else {
             Column[] newColumns = null;
             if (planLine.getNode().rowType()!=null && leftColumns.length + rightColumns.length != planLine.getNode().rowType().recordType().typeList().typePair().size()){
-                throw new IllegalStateException("Left + Right != projected in join");
+                logger.warning("**** Left + Right != projected in join");
+//                throw new IllegalStateException("Left + Right != projected in join");
             }
             newColumns = new Column[leftColumns.length + rightColumns.length];
             System.arraycopy(leftColumns, 0, newColumns, 0, leftColumns.length);
@@ -79,9 +151,14 @@ class JoinAnalysis implements AnalyzerRule {
             newContextMap.put("columns", newColumns);
             String condition = attrMap.get("condition");
             String resolvedCond = PlanAnalyzer.resolveVariables(condition, newColumns, planLine.getId(), true);
-            newContextMap.put("conditionStr", resolvedCond);
+            newContextMap.put("join_condition", resolvedCond);
+            newContextMap.put("is_broadcast", isBroadcast(planLine.getChild(0)) || isBroadcast(planLine.getChild(1)));
         }
 
+    }
+
+    private boolean isBroadcast(PlanLine planLine){
+        return planLine.getPlanName().contains("Broadcast") || (planLine.getChildCount()>0 && planLine.getChild(0).getPlanName().contains("Broadcast"));
     }
 }
 
@@ -95,7 +172,7 @@ class ProjectAnalyzer implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         Column[] sourceColumns = (Column[]) planLine.getChildren().get(0).getInfo().get("columns");
         Column[] newColumns = new Column[attrMap.size()];
         StringBuffer projectionStr = new StringBuffer();
@@ -144,13 +221,14 @@ class TableAnalyzer implements AnalyzerRule {
     @Override
     public boolean match(PlanLine line, Map<String, String> attrMap) {
         String planName = line.getPlanName();
-        return planName.indexOf("Scan")!=-1 || planName.indexOf("Values")!=-1 || planName.equals("BridgeReader") ||
-                planName.equals("TableFunction") || planName.equals("BridgeReader") ||
-                planName.indexOf("IcebergManifest")!=-1 || planName.indexOf("Empty") != -1 || planName.equals("Writer");
+        return planName.contains("Scan") || planName.contains("Values") || planName.contains("BridgeReader") ||
+                planName.contains("TableFunction") ||
+                planName.contains("IcebergManifest") || planName.contains("Empty") || planName.equals("Writer");
+//                || planName.contains("JdbcCrel") || planName.contains("JdbcRel");
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>,
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>,
             Map<String, Metrics>> metrics, Map newContextMap,
                         Map<String, ReflectionDefinition> reflectionMap, AnalysisOption option) {
         String planName = planLine.getPlanName();
@@ -230,11 +308,9 @@ class MetricAnalyzer implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics,
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics,
                         Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
-        String[] strIds = planLine.getNode().PHASE().getText().split("-");
-        Long[] ids = {Long.parseLong(strIds[0]), Long.parseLong(strIds[1])};
-        Map<String, Metrics> metric = metrics.get(Arrays.asList(ids));
+        Map<String, Metrics> metric = planLine.getMetrics(metrics);
         if (metric != null && metric.size() > 0) {
             if (logger.isLoggable(Level.FINE)){
                 logger.fine("Found metrics for " + planLine.getId() + " " + PlanUtils.mkString(metric.entrySet().toArray()));
@@ -245,20 +321,61 @@ class MetricAnalyzer implements AnalyzerRule {
                 newContextMap.put("metric", toSum(metric));
             }
             Metrics input0 = metric.get("input_record0");
-            newContextMap.put("input0_skewness", input0.skewness());
-            if (metric.containsKey("input_record1") && metric.containsKey("output_records")) {//a join
-                Metrics input1 = metric.get("input_record1");
 
-                Metrics output = metric.get("output_records");
-                double input = Math.max(input0.sum(), input1.sum());
-                if (input == 0) {
-                    newContextMap.put("JoinRatio", 0);
-                } else {
-                    newContextMap.put("JoinRatio", output.sum() / input);
+            if (parent!=null) {
+                newContextMap.put("input0_skewness", input0.skewness());
+                if (metric.containsKey("input_record1") && metric.containsKey("output_records")) {//a join
+                    Metrics input1 = metric.get("input_record1");
+
+                    Metrics output = metric.get("output_records");
+                    double input = Math.max(input0.sum(), input1.sum());
+                    if (input == 0) {
+                        newContextMap.put("join_ratio", 0);
+                    } else {
+                        newContextMap.put("join_ratio", output.sum() / input);
+                    }
+                    newContextMap.put("input_values", Arrays.asList(input0.sortedData()));
+
+                    newContextMap.put("input1_skewness", input1.skewness());
+                    newContextMap.put("output_skewness", output.skewness());
+                    double skewChange0 = Math.abs(output.skewness()) - Math.abs(input0.skewness()); //use absolute, since its about how close we are to 0
+                    double skewChange1 = Math.abs(output.skewness()) - Math.abs(input1.skewness());
+                    if (skewChange0 < skewChange1){ //just record the lesser change
+                        newContextMap.put("skew_change", skewChange0);
+                    } else {
+                        newContextMap.put("skew_change", skewChange1);
+                    }
+
+                } else if (parent!=null){
+                    if (parent.getChildCount()==1){
+                        //this is the only child
+                        Metrics parentInput = parent.getMetrics(metrics).get("input_record0");
+                        if (parentInput!=null) {
+                            List<Long> inputs = new ArrayList(input0.dataPoints);
+                            Collections.sort(inputs);
+                            newContextMap.put("input_counts", inputs);
+                            newContextMap.put("output_skewness", parentInput.skewness());
+                            newContextMap.put("skew_change", Math.abs(parentInput.skewness()) - Math.abs(input0.skewness()));
+                        } else {
+                            logger.warning("Cannot find parent input metrics for " + parent.getPlanName());
+                        }
+                    }
                 }
-                newContextMap.put("input1_skewness", input1.skewness());
-                newContextMap.put("output_skewness", output.skewness());
+
             }
+            Long thisNanos = metric.get("processing_nanos").max();
+            Metrics m = new Metrics("cumulative_processing_nanos");
+            long maxChildNanos = 0;
+            for (int i = 0; i < planLine.getChildCount(); i++) {
+                //cumulative time
+                Metrics processing = (Metrics) planLine.getChild(i).getInfo().get(m.name);
+                if (processing != null) {
+                    maxChildNanos = Math.max(maxChildNanos, processing.sum());
+                }
+            }
+            m.add("", maxChildNanos);
+            m.add("", thisNanos);
+            newContextMap.put(m.name, m);
         }
 
     }
@@ -266,11 +383,8 @@ class MetricAnalyzer implements AnalyzerRule {
     private Map<String, Object> toSum(Map<String, Metrics> metrics) {
         Map<String, Object> sumOnly = new LinkedHashMap<>();
         for (Map.Entry<String, Metrics> e: metrics.entrySet()){
-            if (e.getKey().endsWith("nanos")) {
-                sumOnly.put(e.getKey(), Metrics.formatTime(e.getValue().sum()));
-            } else {
-                sumOnly.put(e.getKey(), Long.valueOf(e.getValue().sum()));
-            }
+            Metrics value = e.getValue();
+            sumOnly.put(e.getKey(), value.format(value.sum()));
         }
         return sumOnly;
     }
@@ -292,7 +406,7 @@ class CopyingRule implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>,
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>,
             Map<String, Metrics>> metrics, Map newContextMap, Map<String,
             ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         Map<String, Object> childInfo = planLine.getChildren().get(0).getInfo();
@@ -316,7 +430,7 @@ class MultiJoinAnalyzer implements AnalyzerRule {
     }
 
     @Override
-    public void process(PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
+    public void process(PlanLine parent, int childIdx, PlanLine planLine, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         try {
             List<int[]> projectFields = parseProjectionFields(attrMap.get("projFields"));
             ArrayList<Column> outColumns = new ArrayList<Column>();
@@ -382,7 +496,7 @@ class AggregateRule implements AnalyzerRule{
     }
 
     @Override
-    public void process(PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
+    public void process(PlanLine parent, int childIdx, PlanLine line, Map<String, String> attrMap, Map<List<Long>, Map<String, Metrics>> metrics, Map newContextMap, Map<String, ReflectionDefinition> reflectionDefinitionMap, AnalysisOption option) {
         PlanLine child = line.getChild(0);
 
         Column[] sourceColumns = (Column[])child.getInfo().get("columns");

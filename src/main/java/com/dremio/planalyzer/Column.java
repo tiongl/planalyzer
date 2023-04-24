@@ -39,6 +39,8 @@ class Column {
     public String getName(boolean withTbName) {
         if (withTbName && tbName != null) {
             return tbName + "." + name;
+        } else if (expression!=null) {
+            return expression;
         } else {
             return name;
         }

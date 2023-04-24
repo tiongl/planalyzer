@@ -28,7 +28,7 @@ public class PlanAnalyzer {
         reflectionMap = reflectionDefinitionMap;
         metrics = metricMap;
         rules.add(new ResolveRule("condition", "conditionStr"));
-        rules.add(new ResolveRule("dist0", "dist"));
+        rules.add(new ExchangeResolveRule());
         rules.add(new JoinAnalysis());
         rules.add(new ProjectAnalyzer());
         rules.add(new TableAnalyzer());
@@ -42,21 +42,24 @@ public class PlanAnalyzer {
         rules.add(new CopyingRule("Exchange", Collections.singleton("columns")));
         rules.add(new CopyingRule("Sort", Collections.singleton("columns")));
         rules.add(new CopyingRule("Limit", Collections.singleton("columns")));
+        rules.add(new CopyingRule("JdbcCrel", Collections.singleton("columns")));
         rules.add(new CopyingRule("WriterCommitter", Collections.singleton("columns")));
+        rules.add(new CopyingRule("WriterPrel", Collections.singleton("columns")));
         rules.add(new CopyingRule("Screen", Collections.singleton("columns")));
+        rules.add(new CostAnalyzer());
         rules.add(new MultiJoinAnalyzer());
 
     }
 
 
-    public Void process(PlanLine planLine, AnalysisOption option) {
+    public Void process(PlanLine parent, int childIdx, PlanLine planLine, AnalysisOption option) {
         PlanParser.PlanLineContext ctx = planLine.getNode();
         Map newContextMap = new HashMap<String, String>();
 
         for (int i = 0; i<planLine.getChildren().size(); i++){
             depth += 1;
             logger.fine("Checking child " + planLine.getChildren().get(i).getId() + "(depth=" + depth + ")");
-                    process(planLine.getChildren().get(i), option);
+                    process(planLine, childIdx, planLine.getChildren().get(i), option);
             depth -= 1;
         }
 
@@ -68,7 +71,7 @@ public class PlanAnalyzer {
         for (AnalyzerRule r: rules){
             if (r.match(planLine, attrMap)){
 //                System.out.println("Use rule " + r + " on " + planLine.getId());
-                r.process(planLine, attrMap, metrics, newContextMap, reflectionMap, option);
+                r.process(parent, childIdx , planLine, attrMap, metrics, newContextMap, reflectionMap, option);
                 matches += 1;
             }
         }
@@ -142,10 +145,11 @@ public class PlanAnalyzer {
     }
 
     public void process(PlanLine context, AnalysisOption option, String outputFile) throws IOException {
-        process(context, option);
+        process(null, 0, context, option);
         PlanPrinter printer = new PlanPrinter(option);
         printer.process(context);
         if (outputFile!=null) {
+            logger.info("Writing output " + outputFile);
             new FileOutputStream(outputFile).write(printer.getString().getBytes(StandardCharsets.UTF_8));
         }
     }

@@ -30,6 +30,11 @@ public class ConditionVariableResolver extends ExpressionBaseVisitor<String> {
     }
 
     @Override
+    public String visitTypeSuffix(ExpressionParser.TypeSuffixContext ctx) {
+        return null; //do nothing
+    }
+
+    @Override
     public String visitTerminal(TerminalNode node) {
         Token t = node.getSymbol();
         if (t.getType() != Token.EOF){
